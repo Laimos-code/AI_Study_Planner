@@ -1,252 +1,430 @@
 import streamlit as st
 import datetime
 import pandas as pd
-import numpy as np
+import altair as alt
 import time
 
-# --- 1. SET PAGE CONFIG ---
+from utils.storage import load_data, save_data
+from core.scheduler import generate_schedule
+from core.priority_engine import calculate_priority
+
+
 st.set_page_config(page_title="AI Study Planner", page_icon="🔮", layout="wide")
 
-# --- 2. THE CSS OVERHAUL (Keeping your exact UI intact) ---
+DATA_PATH = "data/subjects.json"
+
+
 st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap');
 
-    .stApp {
-        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-    }
+html, body, [class*="css"] {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
 
-    .glass-card {
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 20px;
-        padding: 25px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        margin-bottom: 20px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    }
+.stApp {
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+}
 
-    .gradient-text {
-        background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 700;
-        font-size: 3rem;
-        margin-bottom: 0px;
-    }
+.glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 20px;
+    padding: 25px;
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(10px);
+    margin-bottom: 20px;
+}
 
-    [data-testid="stSidebar"] {
-        background-color: rgba(15, 23, 42, 0.8);
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
-    }
+.gradient-text {
+    background: linear-gradient(90deg,#6366f1,#a855f7,#ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight:700;
+    font-size:3rem;
+}
 
-    div.stButton > button:first-child {
-        background: linear-gradient(45deg, #4f46e5, #7c3aed);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 12px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        width: 100%;
-    }
-    div.stButton > button:first-child:hover {
-        transform: scale(1.02);
-        box-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
-    }
-
-    [data-testid="stMetricValue"] {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #f8fafc;
-    }
-    
-    /* Timer specific styling */
-    .pomodoro-timer {
-        font-size: 5rem;
-        font-weight: 800;
-        text-align: center;
-        background: linear-gradient(90deg, #a855f7, #ec4899);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 20px 0;
-    }
-    </style>
+.pomodoro-timer{
+    font-size:5rem;
+    font-weight:800;
+    text-align:center;
+    background:linear-gradient(90deg,#a855f7,#ec4899);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+}
+</style>
 """, unsafe_allow_html=True)
 
-# --- 3. SIDEBAR NAVIGATION ---
+
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3858/3858711.png", width=80) 
+
+    st.image("https://cdn-icons-png.flaticon.com/512/3858/3858711.png", width=80)
+
     st.markdown("### AI Study Planner")
-    menu = st.radio("Navigation", 
-                    ["Dashboard", "Add Subject", "Generate Schedule", "Revision", "Productivity"], 
-                    label_visibility="collapsed")
+
+    menu = st.radio(
+        "Navigation",
+        ["Dashboard","Add Subject","Generate Schedule","Revision","Productivity"],
+        label_visibility="collapsed"
+    )
+
     st.divider()
-    # Removed the AI Model info box as requested
 
-# --- 4. PAGE LOGIC ---
 
-# ---------------------------------
-# PAGE: DASHBOARD (Newly Built)
-# ---------------------------------
+
+# ---------------- DASHBOARD ----------------
+
 if menu == "Dashboard":
-    st.markdown('<p class="gradient-text">Overview Dashboard</p>', unsafe_allow_html=True)
-    st.write("Welcome back. Here is your academic telemetry.")
-    
-    # Top Metrics Row
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Total Topics", "42", "+3 this week")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with m2:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Focus Hours", "18.5", "On track")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with m3:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Completion", "64%", "+2%")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with m4:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Current Streak", "5 Days", "🔥")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    # Activity Chart Area
+    st.markdown('<p class="gradient-text">Overview Dashboard</p>', unsafe_allow_html=True)
+
+    subjects = load_data(DATA_PATH)
+
+    total_topics = sum(s["syllabus_total"] for s in subjects)
+    completed_topics = sum(s["syllabus_completed"] for s in subjects)
+
+    completion = 0
+    if total_topics > 0:
+        completion = (completed_topics/total_topics)*100
+
+    focus_hours = completed_topics * 1.5
+
+    m1,m2,m3,m4 = st.columns(4)
+
+    with m1:
+        st.metric("Total Topics", total_topics)
+
+    with m2:
+        st.metric("Focus Hours", round(focus_hours,1))
+
+    with m3:
+        st.metric("Completion", f"{completion:.1f}%")
+
+    with m4:
+        st.metric("Subjects", len(subjects))
+
+
+    # -------- Better Chart --------
+
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("Weekly Activity Heatmap")
-    chart_data = pd.DataFrame(
-        np.random.randn(20, 3),
-        columns=['Data Structures', 'Quantum Theory', 'Linear Algebra'])
-    st.area_chart(chart_data)
+
+    st.subheader("Study Distribution")
+
+    if subjects:
+
+        data = []
+
+        for s in subjects:
+
+            remaining = s["syllabus_total"] - s["syllabus_completed"]
+
+            data.append({
+                "Subject": s["name"],
+                "Completed": s["syllabus_completed"],
+                "Remaining": remaining
+            })
+
+        df = pd.DataFrame(data)
+
+        df_melt = df.melt(id_vars="Subject", var_name="Status", value_name="Topics")
+
+        chart = alt.Chart(df_melt).mark_bar().encode(
+            x="Subject",
+            y="Topics",
+            color="Status",
+            tooltip=["Subject","Status","Topics"]
+        ).properties(height=350)
+
+        st.altair_chart(chart, use_container_width=True)
+
+    else:
+
+        st.info("Add subjects to see analytics.")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------------------------
-# PAGE: ADD SUBJECT (Original)
-# ---------------------------------
+
+    # -------- Adaptive AI Recommendation --------
+
+    st.subheader("🎯 AI Recommendation")
+
+    if subjects:
+
+        best_subject = max(subjects, key=lambda s: calculate_priority(s))
+
+        remaining = best_subject["syllabus_total"] - best_subject["syllabus_completed"]
+
+        st.success(
+            f"""
+            **Today's Focus: {best_subject['name']}**
+
+            Remaining Topics: **{remaining}**
+
+            The AI selected this subject because it has the highest priority based on:
+            difficulty, exam proximity, and remaining syllabus.
+            """
+        )
+
+
+
+# ---------------- ADD SUBJECT ----------------
+
 elif menu == "Add Subject":
+
     st.markdown('<p class="gradient-text">New Target</p>', unsafe_allow_html=True)
-    st.write("Set your academic milestones and difficulty parameters.")
-    
+
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    col1, col2 = st.columns([1, 1], gap="large")
+
+    col1,col2 = st.columns([1,1], gap="large")
+
     with col1:
-        subject = st.text_input("Subject Title", placeholder="Enter subject name...")
-        exam_date = st.date_input("Deadline / Exam Date", value=datetime.date(2026, 3, 15))
-        difficulty = st.select_slider("Intensity Level", options=["Low", "Medium", "High", "Critical"])
-    
+
+        subject = st.text_input("Subject Title")
+
+        exam_date = st.date_input("Deadline / Exam Date", value=datetime.date(2026,3,15))
+
+        difficulty = st.select_slider(
+            "Intensity Level",
+            options=["Low","Medium","High","Critical"]
+        )
+
     with col2:
-        st.write("Current Standing")
+
         topics = st.number_input("Total Topics", value=10)
+
         done = st.number_input("Topics Finished", value=0, max_value=topics)
-        
-        progress = (done/topics) if topics > 0 else 0
+
+        progress = (done/topics) if topics>0 else 0
+
         st.progress(progress)
+
         st.caption(f"Status: {int(progress*100)}% Complete")
 
-    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("Initialize Subject"):
+
+        subjects = load_data(DATA_PATH)
+
+        difficulty_map = {
+            "Low":1,
+            "Medium":2,
+            "High":3,
+            "Critical":4
+        }
+
+        new_subject = {
+            "name": subject.title(),
+            "exam_date": str(exam_date),
+            "difficulty": difficulty_map[difficulty],
+            "syllabus_total": topics,
+            "syllabus_completed": done
+        }
+
+        subjects.append(new_subject)
+
+        save_data(DATA_PATH, subjects)
+
         st.balloons()
-        st.success(f"Successfully integrated {subject} into your neural net.")
+
+        st.success(f"{subject} added successfully!")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------------------------
-# PAGE: GENERATE SCHEDULE (Original)
-# ---------------------------------
+
+
+# ---------------- GENERATE SCHEDULE ----------------
+
 elif menu == "Generate Schedule":
+
     st.markdown('<p class="gradient-text">AI Schedule</p>', unsafe_allow_html=True)
-    
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Study Velocity", "4.2 hrs/day", "+0.5h")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with m2:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Exam Proximity", "12 Days", "Priority: HIGH")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with m3:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.metric("Cognitive Load", "68%", "Optimal")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.expander("Customize AI Generation Parameters", expanded=True):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.multiselect("Active Subjects", ["Data Structures", "Quantum Theory", "Linear Algebra"], default=["Data Structures"])
-        with col_b:
-            st.selectbox("Optimization Goal", ["Retention Max", "Speed Run", "Balanced"])
-        
-        if st.button("Generate Optimized Path"):
-            with st.spinner("Synthesizing optimal study blocks..."):
-                time.sleep(1)
-            st.write("### 📅 Weekly Roadmap")
-            df = pd.DataFrame({
-                "Time Block": ["08:00 - 10:00", "10:30 - 12:30", "14:00 - 16:00", "19:00 - 21:00"],
-                "Activity": ["Deep Work: Theory", "Problem Sets", "Active Recall", "Light Review"],
-                "Subject": ["Data Structures", "Data Structures", "Quantum Theory", "General"]
-            })
-            st.table(df)
+    subjects = load_data(DATA_PATH)
 
-# ---------------------------------
-# PAGE: REVISION (Newly Built)
-# ---------------------------------
-elif menu == "Revision":
-    st.markdown('<p class="gradient-text">Spaced Repetition</p>', unsafe_allow_html=True)
-    st.write("Topics the AI determined you are most likely to forget today.")
-    
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("⚠️ Critical Review Needed")
-    st.checkbox("Data Structures: Big O Notation")
-    st.checkbox("Quantum Theory: Schrödinger equation")
-    st.markdown('</div>', unsafe_allow_html=True)
+    if not subjects:
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("🔄 Routine Reinforcement")
-    st.checkbox("Linear Algebra: Matrix Multiplication")
-    st.checkbox("Data Structures: Linked Lists")
-    st.checkbox("General: Study Techniques")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("Log Revision Session"):
-        st.success("Neurological pathways reinforced! Memory updated.")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.warning("Add subjects first.")
 
-# ---------------------------------
-# PAGE: PRODUCTIVITY (Newly Built)
-# ---------------------------------
-elif menu == "Productivity":
-    st.markdown('<p class="gradient-text">Focus Engine</p>', unsafe_allow_html=True)
-    st.write("Deep work timer to maximize your cognitive output.")
-
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    
-    mode = st.radio("Mode", ["Pomodoro (25m)", "Deep Work (90m)", "Short Break (5m)"], horizontal=True)
-    
-    # Fake timer display
-    if mode == "Pomodoro (25m)":
-        st.markdown('<p class="pomodoro-timer">25:00</p>', unsafe_allow_html=True)
-    elif mode == "Deep Work (90m)":
-        st.markdown('<p class="pomodoro-timer">90:00</p>', unsafe_allow_html=True)
     else:
-        st.markdown('<p class="pomodoro-timer">05:00</p>', unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1, 1, 1])
+        schedule = generate_schedule(subjects)
+
+        df = pd.DataFrame(schedule)
+
+        st.subheader("Optimized Study Plan")
+
+        st.table(df)
+
+
+        # -------- Explainable AI --------
+
+        st.subheader("🧠 AI Reasoning")
+
+        for s in subjects:
+
+            remaining = s["syllabus_total"] - s["syllabus_completed"]
+
+            exam = datetime.datetime.strptime(s["exam_date"], "%Y-%m-%d").date()
+
+            days_left = (exam - datetime.date.today()).days
+
+            st.info(
+                f"""
+                **{s['name']}**
+
+                Remaining Topics: {remaining}
+
+                Days Until Exam: {days_left}
+
+                Difficulty Level: {s['difficulty']}
+
+                Priority Score: {round(calculate_priority(s),2)}
+
+                The AI prioritized this subject based on exam urgency,
+                syllabus workload, and difficulty level.
+                """
+            )
+
+
+
+# ---------------- REVISION ----------------
+
+elif menu == "Revision":
+
+    st.markdown('<p class="gradient-text">Spaced Repetition</p>', unsafe_allow_html=True)
+
+    subjects = load_data(DATA_PATH)
+
+    if subjects:
+
+        for s in subjects:
+
+            remaining = s["syllabus_total"] - s["syllabus_completed"]
+
+            if remaining > 0:
+
+                st.checkbox(f"{s['name']} review remaining topics ({remaining})")
+
+    else:
+
+        st.info("No subjects available.")
+
+
+
+# ---------------- PRODUCTIVITY ----------------
+
+elif menu == "Productivity":
+
+    st.markdown('<p class="gradient-text">Focus Engine</p>', unsafe_allow_html=True)
+    st.write("Structured deep-work sessions using the Pomodoro method.")
+
+    # ---------- SESSION STATE ----------
+
+    if "timer_running" not in st.session_state:
+        st.session_state.timer_running = False
+
+    if "time_left" not in st.session_state:
+        st.session_state.time_left = 1500
+
+    if "sessions_completed" not in st.session_state:
+        st.session_state.sessions_completed = 0
+
+
+    # ---------- MODE SELECTION ----------
+
+    mode = st.radio(
+        "Mode",
+        ["Pomodoro (25m)", "Deep Work (90m)", "Short Break (5m)"],
+        horizontal=True
+    )
+
+
+    if mode == "Pomodoro (25m)":
+        total_time = 25 * 60
+    elif mode == "Deep Work (90m)":
+        total_time = 90 * 60
+    else:
+        total_time = 5 * 60
+
+
+    # ---------- RESET TIMER WHEN MODE CHANGES ----------
+
+    if st.session_state.time_left > total_time:
+        st.session_state.time_left = total_time
+
+
+    # ---------- TIMER DISPLAY ----------
+
+    minutes = st.session_state.time_left // 60
+    seconds = st.session_state.time_left % 60
+
+    st.markdown(
+        f'<p class="pomodoro-timer">{minutes:02d}:{seconds:02d}</p>',
+        unsafe_allow_html=True
+    )
+
+
+    # ---------- BUTTONS ----------
+
+    col1, col2, col3 = st.columns(3)
+
     with col1:
-        st.button("▶️ Start Focus Block", use_container_width=True)
+        if st.button("▶ Start"):
+            st.session_state.timer_running = True
+
     with col2:
-        st.button("⏸️ Pause", use_container_width=True)
+        if st.button("⏸ Pause"):
+            st.session_state.timer_running = False
+
     with col3:
-        st.button("🔄 Reset", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Distraction block toggle
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("🛡️ Distraction Shield")
-    st.toggle("Block Social Media (Requires Browser Extension)")
-    st.toggle("Enable Ambient White Noise")
-    st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("🔄 Reset"):
+            st.session_state.timer_running = False
+            st.session_state.time_left = total_time
+
+
+    # ---------- TIMER LOOP ----------
+
+    if st.session_state.timer_running:
+
+        time.sleep(1)
+
+        st.session_state.time_left -= 1
+
+        if st.session_state.time_left <= 0:
+
+            st.session_state.timer_running = False
+
+            if "Break" not in mode:
+                st.session_state.sessions_completed += 1
+                st.success("Focus session completed! Take a break.")
+
+            st.session_state.time_left = total_time
+
+        st.rerun()
+
+
+    # ---------- SESSION ANALYTICS ----------
+
+    st.markdown("---")
+
+    st.subheader("Productivity Stats")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Focus Sessions Completed", st.session_state.sessions_completed)
+
+    with col2:
+        focus_hours = round(st.session_state.sessions_completed * 25 / 60, 2)
+        st.metric("Total Focus Hours", focus_hours)
+
+
+    # ---------- MOTIVATION ----------
+
+    st.markdown("---")
+
+    st.info(
+        """
+        💡 **Focus Tip**
+
+        Work in deep-focus intervals and avoid multitasking.
+        The Pomodoro technique improves concentration and reduces burnout.
+        """
+    )
