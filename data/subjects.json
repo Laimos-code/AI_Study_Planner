@@ -1,0 +1,30 @@
+[
+    {
+        "name": "maths",
+        "difficulty": 3,
+        "exam_date": "2026-03-16",
+        "syllabus_total": 6.0,
+        "syllabus_completed": 2.0
+    },
+    {
+        "name": "maths",
+        "difficulty": 3,
+        "exam_date": "2026-03-16",
+        "syllabus_total": 6.0,
+        "syllabus_completed": 2.0
+    },
+    {
+        "name": "science",
+        "difficulty": 4,
+        "exam_date": "2026-03-17",
+        "syllabus_total": 7.0,
+        "syllabus_completed": 4.0
+    },
+    {
+        "name": "bio",
+        "difficulty": 4,
+        "exam_date": "2026-03-18",
+        "syllabus_total": 7.0,
+        "syllabus_completed": 4.0
+    }
+]
